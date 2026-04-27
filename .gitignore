@@ -1,0 +1,8 @@
+/target
+/.scratch
+/.claude
+Cargo.lock
+# Local secrets — Helius RPC key etc. (`scripts/fetch_fixtures.py` reads it).
+.env
+.env.*
+!.env.example

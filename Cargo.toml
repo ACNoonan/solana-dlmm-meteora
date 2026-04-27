@@ -1,0 +1,33 @@
+[package]
+name = "solana-dlmm-meteora"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.81"  # core::error::Error stabilized in 1.81
+license = "MIT OR Apache-2.0"
+description = "Pure-Rust, no-RPC swap math for the Meteora DLMM (bin-based AMM) on Solana. Extracted from the on-chain program with no Anchor / solana-program / runtime dependencies."
+keywords = ["solana", "meteora", "dlmm", "amm", "defi"]
+categories = ["finance", "mathematics", "no-std"]
+readme = "README.md"
+repository = "https://github.com/ACNoonan/solana-dlmm-meteora"
+documentation = "https://docs.rs/solana-dlmm-meteora"
+# Keep the differential-test program ELF and large mainnet fixtures out of the
+# crates.io artifact. They will be tracked in git so contributors can run the
+# litesvm tests, but published consumers don't need them. (Files don't exist
+# yet; the metadata block belongs here now so future drops slot in cleanly.)
+exclude = [
+    "tests/fixtures/lb_clmm.so",
+    "tests/fixtures/swap_*.json",
+    "tests/fixtures/dlmm_pool_metadata.json",
+]
+
+[lib]
+doctest = false
+
+[dependencies]
+# 256-bit integer math for the swap-step `(price * amount) >> 64` path.
+# Matches upstream MeteoraAg/dlmm-sdk `commons` crate, which uses the same
+# `ruint::aliases::U256`. Tiny dep, no anchor / solana-program coupling.
+ruint = "1"
+
+[dev-dependencies]
+proptest = "1"

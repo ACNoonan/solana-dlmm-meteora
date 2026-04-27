@@ -4,6 +4,16 @@ Captured 2026-04-27 to plant the flag while the litesvm differential is
 finished in `solana-clmm-raydium`. Future-you (or future-Claude) reads
 this cold to start implementation.
 
+> **Amendments (2026-04-27, milestones 1+2 cut):** the upstream paths
+> below originally pointed at `programs/lb_clmm/src/...`; that directory
+> doesn't exist on `MeteoraAg/dlmm-sdk` `main`. The Meteora math now
+> lives in the `commons` crate. The "Math primitives to extract" table
+> and "Public API surface" sections below have been corrected to match
+> reality. Three deferrals out of the original v0.1 surface are now in
+> the table for the same reason — they don't have an integer-deterministic
+> upstream to extract from. See [`CHANGELOG.md`](CHANGELOG.md) for the
+> running record.
+
 ## Goal
 
 A pure-Rust, no-RPC Rust crate that exposes the deterministic integer
@@ -41,23 +51,35 @@ Other distinctive bits:
 
 ## Math primitives to extract
 
-Mirroring upstream `MeteoraAg/dlmm-sdk` paths:
+Mirroring upstream `MeteoraAg/dlmm-sdk` paths (corrected 2026-04-27 —
+upstream consolidated all of this into the `commons` crate; the
+`programs/lb_clmm/src/...` paths in earlier drafts no longer exist):
 
 | Upstream | Our module | Notes |
 |---|---|---|
-| `programs/lb_clmm/src/math/u64x64_math.rs` | `bin_math.rs` | bin id ↔ price (Q64.64), `get_price_from_id` |
-| `programs/lb_clmm/src/math/safe_math.rs` | `full_math.rs` | likely portable verbatim from `solana-clmm-raydium` |
-| `programs/lb_clmm/src/math/utils_math.rs` | `bin_math.rs` (merge) | `safe_mul_div_cast` etc. |
-| `programs/lb_clmm/src/state/dynamic_fee.rs` | `dynamic_fee.rs` | **The FSM. Net-new vs CLMM.** |
-| `programs/lb_clmm/src/manager/bin_array_manager.rs` | `bin_array.rs` | bin lookup, walking |
-| `programs/lb_clmm/src/manager/swap_manager.rs` | `swap_full.rs` | the orchestration loop |
-| `programs/lb_clmm/src/state/lb_pair.rs` swap helpers | `swap_math.rs` | single-bin step |
-| `commons/src/quote.rs` | (reference for diff testing) | NOT extracted — used as differential proptest oracle |
+| `commons/src/math/u64x64_math.rs` (`pow`) | `bin_math.rs` | Q64.64 binary-exponential engine |
+| `commons/src/math/price_math.rs` | `bin_math.rs` | `get_price_from_id` |
+| `commons/src/constants.rs` | `bin_math.rs` (constants) | `MIN_BIN_ID`, `MAX_BIN_ID`, `BASIS_POINT_MAX` |
+| `commons/src/math/u128x128_math.rs`, `utils.rs` | `full_math.rs` (TBD) | `mul_div`, `mul_shr`, `safe_*_cast` — port lazily as swap math demands them |
+| `commons/src/extensions/bin.rs` (per-bin swap) | `swap_math.rs` | single-bin step |
+| `commons/src/extensions/lb_pair.rs` (FSM glue) + dynamic-fee logic in the on-chain program | `dynamic_fee.rs` | **The FSM. Net-new vs CLMM.** Highest-risk port. |
+| `commons/src/extensions/bin_array.rs`, `bin_array_bitmap.rs` | `bin_array.rs` | bin lookup, walking |
+| `commons/src/quote.rs` | `swap_full.rs` | the orchestration loop (and a v0.2+ differential proptest oracle) |
+
+Three primitives originally listed in the v0.1 surface but **deferred
+out**, because upstream's only implementation isn't an integer-
+deterministic primitive we can extract:
+
+| Primitive | Why deferred | Likely fate |
+|---|---|---|
+| `get_id_from_price` | Upstream lives in `cli/src/math.rs` and uses `rust_decimal::Decimal::log10` — taking the dep would break the no-RPC integer-only posture; re-deriving an integer Q64.64 log is non-verbatim and non-trivial to value-pin | Re-derive integer-only in v0.2, value-pinned against the upstream float impl across the bin range |
+| Token-2022 transfer-fee math | Symmetric with sibling — sibling shipped this in v0.2 (after v0.1 + audit) | v0.2 here as well; lift the sibling's `transfer_fee` module verbatim, re-pin against the same `spl_token_2022_interface` differential |
+| `quote_exact_in` / `quote_exact_out` high-level wrappers | DESIGN.md called these out as "decisions deferred to implementation time"; sibling stopped at `compute_swap_full` for v0.1 | v0.2; trivial wrappers around `compute_swap_full` once the orchestrator exists |
 
 The dynamic-fee FSM is the highest-risk port. It's the part with no CLMM
 analog and the part most likely to drift between upstream releases.
-Extract carefully; ship verbatim from the released `programs/lb_clmm`
-crate (not `commons` — `commons` may rewrite it).
+Extract carefully and value-pin against captured mainnet swap fixtures
+plus the future litesvm differential.
 
 ## Public API surface (target)
 
@@ -65,9 +87,8 @@ Mirror `solana-clmm-raydium`'s curated re-exports as closely as makes
 sense:
 
 ```rust
-pub use bin_math::{
-    get_price_from_id, get_id_from_price, MAX_BIN_ID, MIN_BIN_ID,
-};
+pub use bin_math::{get_price_from_id, MAX_BIN_ID, MIN_BIN_ID};
+//                                ^^^^ get_id_from_price deferred to v0.2
 
 pub use swap_math::{compute_swap_step, SwapStep};
 
@@ -82,9 +103,19 @@ pub use error::ErrorCode;
 
 `compute_swap_full(&BinPool, &[BinView], amount, sqrt_price_limit, ...)`
 should be the headline "one call to swap" function, same role as in
-`solana-clmm-raydium`. `BinView` is the flat (bin_id, liquidity_x,
-liquidity_y) view that the caller flattens from their decoded
-`BinArray`s.
+`solana-clmm-raydium`. `BinView` is a **flat** caller-prepared
+projection of the upstream `Bin` (`bin_id`, `amount_x`, `amount_y`,
+`liquidity_supply` — whatever the swap step needs and nothing more);
+the caller flattens decoded `BinArray`s into `&[BinView]` themselves.
+This keeps the v0.1 surface narrow and stable across upstream
+`Bin`/`BinArray` changes.
+
+`SwapResult` mirrors upstream `commons/src/typedefs.rs::SwapResult`
+field names (`amount_in_with_fees`, `amount_out`, `fee`,
+`protocol_fee_after_host_fee`, `host_fee`, `is_exact_out_amount`)
+rather than re-shaping into the sibling's flatter form. This shape
+is what the future differential proptest will compare against, so
+making the diff trivial is worth the slightly chunkier surface.
 
 ## Test strategy
 
@@ -96,10 +127,16 @@ Five layers, in priority order:
 2. **Differential proptest** against `MeteoraAg/dlmm-sdk` `commons`
    crate as a dev-dep — directly compare our `compute_swap_full` to
    `commons::quote::quote_exact_in`/`_out` over fuzzed inputs.
-   Locks parity automatically as upstream evolves.
-3. **Mainnet replay** of 10–20 captured swaps via the same Helius
-   pattern this org's CLMM crate uses. DLMM pools have higher activity
-   than Token-2022-on-CLMM, so capture is easier.
+   Locks parity automatically as upstream evolves. **Deferred to v0.2:**
+   `commons` pulls anchor-lang + the full anchor codegen + solana-program;
+   sibling went without a heavy differential dev-dep at v0.1 and added
+   only `spl-token-2022-interface` for `transfer_fee` parity, then
+   `litesvm` at v0.3. Same pacing here.
+3. **Mainnet replay** of 10–20 captured swaps. Use public mainnet RPC
+   (`api.mainnet-beta.solana.com`) for capture rather than Helius — it
+   works for one-shot fetches without a `.env` requirement, and DLMM
+   pools have enough activity that we don't need Helius's higher rate
+   limit. Deviation from sibling, intentional.
 4. **Litesvm differential** — load the on-chain `lb_clmm` ELF, drive
    swap instructions, compare to our math byte-for-byte. The harness
    pattern carries directly from
@@ -147,13 +184,18 @@ Total estimate: **5–7 working days**.
 
 ## Decisions deferred to implementation time
 
-- Whether to ship `commons`-style high-level quote helpers
-  (`quote_exact_in` / `quote_exact_out` wrappers) at v0.1 or v0.2.
-- Whether to expose the `BinArray` decoder (probably not — same
-  rationale as `solana-clmm-raydium` not exposing `PoolState` decoders;
-  caller's job).
-- Whether to feature-gate the differential dev-deps. Likely no — same
-  rationale as `solana-clmm-raydium`'s spl-token-2022-interface dev-dep.
+- ~~Whether to ship `commons`-style high-level quote helpers
+  (`quote_exact_in` / `quote_exact_out` wrappers) at v0.1 or v0.2.~~
+  **Resolved 2026-04-27: v0.2.** `compute_swap_full` is the v0.1 ceiling.
+- Whether to expose the `BinArray` decoder. **Resolved 2026-04-27: no,
+  caller's job.** `BinView` is the flat caller-prepared projection;
+  decoding stays out of the published crate, mirroring sibling's
+  `PoolState` posture.
+- ~~Whether to feature-gate the differential dev-deps.~~
+  **Resolved 2026-04-27: drop the `commons` differential entirely from
+  v0.1.** v0.1 leans on mainnet replay + property invariants; v0.2 adds
+  `commons` (or litesvm) once we know what shape the orchestrator
+  settles on.
 
 ## References
 
