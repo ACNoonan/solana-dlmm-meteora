@@ -99,8 +99,8 @@ cargo clippy --tests -- -D warnings && cargo clippy --lib
 
 ## End-of-session pointers (2026-07-21)
 
-- Branch: `main`, four local commits ahead of the 2026-04-27 push
-  (milestones 4, 5, 6, 7). Not pushed.
-- All 39 tests passing, fmt + clippy clean.
-- Next action: Adam reviews, pushes, runs `cargo publish --dry-run`,
-  then `cargo publish` 0.1.0 and tags `v0.1.0`.
+- Branch: `main`, pushed to `origin/main` (milestones 4–7,
+  2026-07-21). GitHub description + topics updated to match.
+- All 39 tests passing, fmt + clippy clean; `cargo publish --dry-run`
+  passes.
+- Next action: Adam runs `cargo publish` 0.1.0 and tags `v0.1.0`.
