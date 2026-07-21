@@ -7,9 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Pre-v0.1, milestones 1+2+3 of 7 from `DESIGN.md` landed.
+Pre-v0.1, milestones 1–4 of 7 from `DESIGN.md` landed.
 
 ### Added
+- **Dynamic-fee FSM** (`dynamic_fee` module) — milestone 4, the
+  Meteora-specific piece with no CLMM analog. Verbatim port of the fee
+  logic in `commons/src/extensions/lb_pair.rs`: `update_references`
+  (once-per-swap reference freeze/decay against `filter_period` /
+  `decay_period`), `update_volatility_accumulator` (per-bin-crossed
+  accumulation capped at `max_volatility_accumulator`),
+  `advance_active_bin`, and the fee computations `get_base_fee`,
+  `compute_variable_fee`, `get_variable_fee`, `get_total_fee` (capped at
+  `MAX_FEE_RATE`), `compute_fee` (gross-up, ceil),
+  `compute_fee_from_amount` (contained fee, ceil), and
+  `compute_protocol_fee` (floor). Plus `is_support_limit_order` /
+  `fee_on_input` and their `FunctionType` / `CollectFeeMode` conversions
+  (`commons/src/conversions/`) — upstream features newer than DESIGN.md
+  that the current quote path depends on.
+- **`PoolView` projection** (decision 2 of `docs/HANDOFF.md`, resolved
+  as sketched): a flat caller-prepared projection of the upstream
+  `LbPair` account carrying `active_id`, `bin_step`, `has_rewards`, and
+  verbatim `StaticParameters` / `VariableParameters` PODs (layouts from
+  the anchor IDL, minus explicit padding). FSM functions are free
+  functions over `&mut PoolView` — same field paths as upstream methods,
+  so the extracted bodies stay diffable. Pubkeys, rewards, oracle, and
+  the bin-array bitmap stay in the caller's decoded account; pool
+  status / activation gating is account validation and stays out.
+- Three `ErrorCode` variants: `InsufficientLiquidity` (upstream
+  `advance_active_bin` bound), `PoolOutOfLiquidity` (reserved for the
+  milestone-5 orchestrator loop), `InvalidParameter` (enum-discriminant
+  conversions).
+- **Nine value-pinned FSM tests** (`tests/dynamic_fee.rs`) from an
+  independent Python oracle, over a realistic bin_step=25 preset:
+  quiet-pool fees, variable fee at volatility, `base_fee_power_factor`
+  scaling and the `MAX_FEE_RATE` cap, all three `update_references`
+  branches, accumulator accumulation + cap, a swap-shaped 3-bin FSM
+  sequence with climbing fees, `advance_active_bin` bounds, and the
+  limit-order-support / collect-fee-mode flag tables.
+
+### Added (milestones 1–3)
 - **Crate scaffold** lifted from sibling
   [`solana-clmm-raydium`](https://github.com/ACNoonan/solana-clmm-raydium):
   `Cargo.toml` (MSRV 1.81, dual MIT/Apache-2.0, no runtime deps,

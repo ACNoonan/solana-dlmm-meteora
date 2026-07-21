@@ -29,6 +29,7 @@
 //! flat crate-root modules.
 
 pub mod bin_math;
+pub mod dynamic_fee;
 pub mod error;
 pub mod full_math;
 pub mod swap_math;
@@ -42,6 +43,13 @@ pub use bin_math::{get_price_from_id, MAX_BIN_ID, MIN_BIN_ID};
 
 pub use swap_math::{
     get_amount_in, get_amount_out, get_max_amount_in, get_max_amount_out, BinView,
+};
+
+pub use dynamic_fee::{
+    advance_active_bin, compute_fee, compute_fee_from_amount, compute_protocol_fee,
+    compute_variable_fee, fee_on_input, get_base_fee, get_total_fee, get_variable_fee,
+    is_support_limit_order, update_references, update_volatility_accumulator, CollectFeeMode,
+    FunctionType, PoolView, StaticParameters, VariableParameters,
 };
 
 pub use u128x128_math::Rounding;

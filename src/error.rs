@@ -5,6 +5,16 @@
 pub enum ErrorCode {
     MathOverflow,
     BinIdOutOfBounds,
+    /// Upstream `ensure!(..., "Insufficient liquidity")` in
+    /// `LbPair::advance_active_bin` — the active bin cannot advance past
+    /// `MIN_BIN_ID` / `MAX_BIN_ID`.
+    InsufficientLiquidity,
+    /// Upstream `.context("Pool out of liquidity")` in the quote loop —
+    /// the swap consumed every bin the caller supplied and amount remains.
+    PoolOutOfLiquidity,
+    /// Invalid enum discriminant in pool parameters (`function_type` /
+    /// `collect_fee_mode` byte outside the upstream enum range).
+    InvalidParameter,
 }
 
 impl ErrorCode {
@@ -15,6 +25,9 @@ impl ErrorCode {
         match self {
             ErrorCode::MathOverflow => "arithmetic overflow",
             ErrorCode::BinIdOutOfBounds => "bin_id out of [MIN_BIN_ID, MAX_BIN_ID]",
+            ErrorCode::InsufficientLiquidity => "insufficient liquidity",
+            ErrorCode::PoolOutOfLiquidity => "pool out of liquidity",
+            ErrorCode::InvalidParameter => "invalid enum discriminant in pool parameters",
         }
     }
 }
