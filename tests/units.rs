@@ -8,7 +8,7 @@
 use solana_dlmm_meteora::bin_math::{get_price_from_id, ONE};
 use solana_dlmm_meteora::{
     get_amount_in, get_amount_out, get_max_amount_in, get_max_amount_out, BinView, ErrorCode,
-    MAX_BIN_ID, MIN_BIN_ID,
+    Rounding, MAX_BIN_ID, MIN_BIN_ID,
 };
 
 #[test]
@@ -83,8 +83,11 @@ fn price_monotonic_around_zero() {
 fn swap_step_identity_at_unit_price() {
     // price = ONE means 1 X == 1 Y. Every primitive should be the identity.
     for sfy in [true, false] {
-        assert_eq!(get_amount_out(1000, ONE, sfy).unwrap(), 1000);
-        assert_eq!(get_amount_in(1000, ONE, sfy).unwrap(), 1000);
+        assert_eq!(
+            get_amount_out(1000, ONE, sfy, Rounding::Down).unwrap(),
+            1000
+        );
+        assert_eq!(get_amount_in(1000, ONE, sfy, Rounding::Up).unwrap(), 1000);
     }
 }
 
@@ -92,10 +95,10 @@ fn swap_step_identity_at_unit_price() {
 fn swap_step_at_price_two() {
     // price == 2.0 (Q64.64): 1 X buys 2 Y, equivalently 2 Y buys 1 X.
     let p = 2 * ONE;
-    assert_eq!(get_amount_out(1000, p, true).unwrap(), 2000);
-    assert_eq!(get_amount_out(1000, p, false).unwrap(), 500);
-    assert_eq!(get_amount_in(2000, p, true).unwrap(), 1000);
-    assert_eq!(get_amount_in(500, p, false).unwrap(), 1000);
+    assert_eq!(get_amount_out(1000, p, true, Rounding::Down).unwrap(), 2000);
+    assert_eq!(get_amount_out(1000, p, false, Rounding::Down).unwrap(), 500);
+    assert_eq!(get_amount_in(2000, p, true, Rounding::Up).unwrap(), 1000);
+    assert_eq!(get_amount_in(500, p, false, Rounding::Up).unwrap(), 1000);
 }
 
 #[test]
@@ -104,12 +107,12 @@ fn swap_step_rounding_sensitive() {
     // down; amount_in rounds up. The 1-unit cases below are the smallest
     // inputs that produce a different rounding result for the two paths.
     let p = ONE + 1;
-    assert_eq!(get_amount_out(1, p, true).unwrap(), 1);
-    assert_eq!(get_amount_in(1, p, true).unwrap(), 1);
-    assert_eq!(get_amount_out(1, p, false).unwrap(), 0);
+    assert_eq!(get_amount_out(1, p, true, Rounding::Down).unwrap(), 1);
+    assert_eq!(get_amount_in(1, p, true, Rounding::Up).unwrap(), 1);
+    assert_eq!(get_amount_out(1, p, false, Rounding::Down).unwrap(), 0);
     // 1 * (ONE + 1) >> 64 with ceil is 2, not 1: this is the ceil/floor
     // divergence the upstream contract requires.
-    assert_eq!(get_amount_in(1, p, false).unwrap(), 2);
+    assert_eq!(get_amount_in(1, p, false, Rounding::Up).unwrap(), 2);
 }
 
 #[test]
@@ -118,13 +121,25 @@ fn swap_step_realistic_price() {
     // `price_pinned_small_steps` above. Sanity-check that get_amount_in
     // round-trips get_amount_out within a 1-unit rounding ulp.
     let p = get_price_from_id(100, 100).unwrap();
-    assert_eq!(get_amount_out(1_000_000, p, true).unwrap(), 2_704_813);
-    assert_eq!(get_amount_out(1_000_000, p, false).unwrap(), 369_711);
+    assert_eq!(
+        get_amount_out(1_000_000, p, true, Rounding::Down).unwrap(),
+        2_704_813
+    );
+    assert_eq!(
+        get_amount_out(1_000_000, p, false, Rounding::Down).unwrap(),
+        369_711
+    );
     // Round-trip: Y → required X → matches the original input.
-    assert_eq!(get_amount_in(2_704_813, p, true).unwrap(), 1_000_000);
+    assert_eq!(
+        get_amount_in(2_704_813, p, true, Rounding::Up).unwrap(),
+        1_000_000
+    );
     // Asymmetric direction returns a different value (this is the inverse
     // operation, not a round-trip).
-    assert_eq!(get_amount_in(2_704_813, p, false).unwrap(), 7_316_016);
+    assert_eq!(
+        get_amount_in(2_704_813, p, false, Rounding::Up).unwrap(),
+        7_316_016
+    );
 }
 
 #[test]
@@ -136,6 +151,7 @@ fn swap_step_max_amounts() {
         bin_id: 0,
         amount_x: 10_000,
         amount_y: 50_000,
+        ..BinView::default()
     };
     let p = 2 * ONE;
     assert_eq!(get_max_amount_out(&bin, true), 50_000);
@@ -149,9 +165,12 @@ fn swap_step_overflows_to_u64_cast_error() {
     // u64::MAX * 1.0 fits in u64; u64::MAX * 2.0 doesn't. The cast back
     // from u128 to u64 must surface as MathOverflow, not silently wrap.
     let p = 2 * ONE;
-    assert_eq!(get_amount_out(u64::MAX, ONE, true).unwrap(), u64::MAX,);
     assert_eq!(
-        get_amount_out(u64::MAX, p, true).unwrap_err(),
+        get_amount_out(u64::MAX, ONE, true, Rounding::Down).unwrap(),
+        u64::MAX,
+    );
+    assert_eq!(
+        get_amount_out(u64::MAX, p, true, Rounding::Down).unwrap_err(),
         ErrorCode::MathOverflow,
     );
 }

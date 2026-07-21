@@ -32,6 +32,7 @@ pub mod bin_math;
 pub mod dynamic_fee;
 pub mod error;
 pub mod full_math;
+pub mod swap_full;
 pub mod swap_math;
 pub mod u128x128_math;
 
@@ -42,7 +43,13 @@ pub use error::ErrorCode;
 pub use bin_math::{get_price_from_id, MAX_BIN_ID, MIN_BIN_ID};
 
 pub use swap_math::{
-    get_amount_in, get_amount_out, get_max_amount_in, get_max_amount_out, BinView,
+    get_amount_in, get_amount_out, get_limit_order_amounts_by_direction, get_max_amount_in,
+    get_max_amount_out, get_max_amount_out_with_limit_orders, get_or_store_bin_price, BinView,
+};
+
+pub use swap_full::{
+    compute_swap_full, compute_swap_full_exact_out, swap_exact_in_quote_at_bin,
+    swap_exact_out_quote_at_bin, BinQuoteResult, SwapExactInQuote, SwapExactOutQuote,
 };
 
 pub use dynamic_fee::{

@@ -7,9 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Pre-v0.1, milestones 1–4 of 7 from `DESIGN.md` landed.
+Pre-v0.1, milestones 1–5 of 7 from `DESIGN.md` landed.
 
 ### Added
+- **Multi-bin orchestrator** (`swap_full` module) — milestone 5. Verbatim
+  port of the `commons/src/quote.rs` math core: the per-bin quote steps
+  `swap_exact_in_quote_at_bin` / `swap_exact_out_quote_at_bin` (the DLMM
+  analog of a CLMM `compute_swap_step`), their fill helpers
+  (MM → processed limit orders → open limit orders), `split_fee`
+  (limit-order fee share vs protocol share), and the exact-in /
+  exact-out orchestration loops as `compute_swap_full` /
+  `compute_swap_full_exact_out`. Limit orders and collect-fee-mode
+  (decision 3: full current-upstream parity) are included.
+- **Account plumbing stripped, math kept** — bin-array + bitmap walking
+  is replaced by walking the caller's flat `&[BinView]` (sorted
+  ascending by `bin_id`; an absent id is an empty bin; walking past the
+  supplied bins errors `PoolOutOfLiquidity`); `Clock` becomes a
+  `current_timestamp` parameter; Token-2022 transfer-fee wrapping stays
+  v0.2; `validate_swap_activation` stays with the caller.
+- **`SwapExactInQuote` / `SwapExactOutQuote`** mirror the upstream
+  result shapes plus a `pool_after: PoolView` field (decision 2: the
+  orchestrator copies the pool internally, exactly like upstream's
+  `let mut lb_pair = *lb_pair`, and returns the post-swap state).
+  One deliberate divergence from the quote path, documented in the
+  module docs: `pool_after.last_update_timestamp` is set to
+  `current_timestamp`, matching what the on-chain swap persists
+  (the throwaway upstream quote never writes it) so chained
+  simulation decays correctly.
+- **`BinView` extended** with the upstream `Bin` fields the quote path
+  reads: `price` (stored price, 0 = uninitialized; the exact-out loop
+  resolves it via the new `get_or_store_bin_price`, the exact-in loop
+  reads it as-is — both replicated from upstream), plus
+  `limit_order_ask_side` / `open_order_amount` /
+  `processed_order_remaining_amount`. New `swap_math` functions:
+  `get_or_store_bin_price`, `get_limit_order_amounts_by_direction`,
+  `get_max_amount_out_with_limit_orders`.
+- **`get_amount_in` / `get_amount_out` regained the upstream `Rounding`
+  parameter** (milestone 3 had specialized them to hardcoded rounding;
+  the quote path passes rounding explicitly, so the verbatim signature
+  wins). Breaking vs the unreleased milestone-3 surface.
+- **Twelve value-pinned orchestrator tests** (`tests/swap_full.rs`)
+  from an independent Python re-implementation of the full quote path:
+  single-bin exact-in, 3-bin crossings both directions with climbing
+  dynamic fees, fee-on-output mode, limit-order fills across all three
+  liquidity layers, warm-pool reference decay, out-of-liquidity (and
+  empty-slice) errors, gap-bin equivalence, exact-out with the
+  drain-entire-bin path, lazy-price resolution, and an
+  exact-in → exact-out round trip that reproduces the input exactly.
 - **Dynamic-fee FSM** (`dynamic_fee` module) — milestone 4, the
   Meteora-specific piece with no CLMM analog. Verbatim port of the fee
   logic in `commons/src/extensions/lb_pair.rs`: `update_references`
