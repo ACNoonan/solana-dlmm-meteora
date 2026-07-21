@@ -7,9 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Pre-v0.1, milestones 1–5 of 7 from `DESIGN.md` landed.
+Pre-v0.1, milestones 1–6 of 7 from `DESIGN.md` landed.
 
 ### Added
+- **Property invariants under proptest** (`tests/props.rs`) — milestone
+  6, DESIGN.md test layer 5: price strictly monotonic in bin id (fuzzed
+  over ±2_000 ids × bin_steps 1–100), swap output bounded by supplied
+  reserves / fee bounded by input / protocol fee bounded by fee /
+  active bin landing inside the supplied range (fuzzed pools, bins, and
+  amounts, accepting `PoolOutOfLiquidity` as a legitimate outcome), and
+  the volatility-accumulator cap.
+- **Mainnet-replay fixture** (`tests/mainnet_replay.rs`) — test layer
+  3, adapted: real SOL-USDC pool state (the pair upstream's own
+  integration tests use) captured 2026-07-21 via public RPC — LbPair +
+  the three bin arrays around the active bin, 51 live bins — with four
+  quotes (1 and 5 SOL exact-in, 100 USDC exact-in reversed, 100 USDC
+  exact-out) pinned by the independent Python oracle over the captured
+  state. Byte-exact *transaction* replay (capturing a historical swap's
+  pre-state needs an archive node) is deliberately deferred to the
+  litesvm differential in v0.3, mirroring the sibling's pacing.
+- **`scripts/`** — the independent Python oracles (`oracle_fsm.py`,
+  `oracle_swap.py`) that generated every pinned expectation in the test
+  suite, plus `capture_fixture.py`, which re-captures live pool state
+  (pure-stdlib RPC + anchor-IDL account decoding + ed25519 PDA
+  derivation) and regenerates `tests/mainnet_replay.rs`.
 - **Multi-bin orchestrator** (`swap_full` module) — milestone 5. Verbatim
   port of the `commons/src/quote.rs` math core: the per-bin quote steps
   `swap_exact_in_quote_at_bin` / `swap_exact_out_quote_at_bin` (the DLMM
