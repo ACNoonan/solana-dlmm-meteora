@@ -13,6 +13,26 @@ this cold to start implementation.
 > the table for the same reason — they don't have an integer-deterministic
 > upstream to extract from. See [`CHANGELOG.md`](CHANGELOG.md) for the
 > running record.
+>
+> **Amendments (2026-07-21, milestones 4–7 cut — v0.1 feature-complete):**
+> the three open decisions from `docs/HANDOFF.md` were resolved:
+> (1) the FSM lives entirely in `commons/src/extensions/lb_pair.rs`,
+> confirmed; (2) pool state ships as a flat `PoolView` projection
+> (`active_id`, `bin_step`, `has_rewards`, verbatim `StaticParameters` /
+> `VariableParameters` PODs) rather than a full `LbPair` mirror;
+> (3) FSM functions mutate `&mut PoolView` in place (upstream-faithful),
+> while the orchestrators copy internally — exactly upstream's
+> `let mut lb_pair = *lb_pair` — and return the post-swap state in the
+> result (`pool_after`). Additionally, upstream had grown **limit
+> orders** and **collect-fee-mode** since this document was written; the
+> port follows current upstream `quote.rs` (full parity) rather than the
+> MM-only surface sketched below, so `compute_swap_full` /
+> `compute_swap_full_exact_out` port the quote path per-bin functions
+> (`swap_exact_in_quote_at_bin` / `swap_exact_out_quote_at_bin`) instead
+> of `Bin::swap`, and the result types mirror `SwapExactInQuote` /
+> `SwapExactOutQuote` (plus `pool_after`) instead of
+> `typedefs.rs::SwapResult`. The API sketch below is kept for the
+> historical record; `src/lib.rs` is the source of truth.
 
 ## Goal
 

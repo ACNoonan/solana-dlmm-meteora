@@ -1,182 +1,106 @@
-# HANDOFF — pre-v0.1 of solana-dlmm-meteora
+# HANDOFF — v0.1 feature-complete, awaiting publish
 
 For the next agent (or future-Adam) picking this up cold. Read this
 first; then `CHANGELOG.md` for the running record of what landed; then
-skim `DESIGN.md` for original framing (some upstream paths in DESIGN
-were corrected in-place after milestone 1+2 cut, and three primitives
-were deferred — see the inline amendments).
+`DESIGN.md` for original framing (see its dated amendment blocks — the
+2026-07-21 block records how the three open decisions were resolved and
+how the surface evolved past the original sketch).
 
 ## Status
 
-- **Milestones 1, 2, 3 of 7 from `DESIGN.md` are done.**
-- **11 tests passing**, fmt + clippy (lib + tests) clean.
-- One runtime dep: `ruint` (matches upstream `commons` crate's
-  `U256` use).
-- One dev-dep: `proptest` (not yet exercised — slated for milestone 6).
-- Not yet on crates.io. Adam handles publishing.
+- **All v0.1 milestones (1–7) from `DESIGN.md` are done.** The full
+  swap path is ported: bin math, per-bin primitives, dynamic-fee FSM,
+  and both orchestrators (`compute_swap_full` exact-in,
+  `compute_swap_full_exact_out`), including limit orders and
+  collect-fee-mode — upstream features newer than DESIGN.md.
+- **39 tests passing**, fmt + clippy (lib + tests) clean:
+  - `tests/units.rs` — bin math + per-bin primitives (11)
+  - `tests/dynamic_fee.rs` — FSM value pins (9)
+  - `tests/swap_full.rs` — orchestrator value pins incl. limit orders,
+    fee modes, round trip (12)
+  - `tests/props.rs` — proptest invariants (3)
+  - `tests/mainnet_replay.rs` — captured SOL-USDC mainnet state,
+    oracle-pinned quotes (4)
+- One runtime dep: `ruint`. One dev-dep: `proptest`.
+- **Not yet on crates.io. Adam handles publishing** — `Cargo.toml`
+  metadata is ready; `cargo publish --dry-run` is the remaining step.
 
-## Curated public API at lib root
+## The shape that shipped (decisions resolved 2026-07-21)
 
-```rust
-pub use error::ErrorCode;
-pub use bin_math::{get_price_from_id, MAX_BIN_ID, MIN_BIN_ID};
-pub use swap_math::{
-    BinView, get_amount_in, get_amount_out, get_max_amount_in, get_max_amount_out,
-};
-pub use u128x128_math::Rounding;
-```
+| Decision | Resolution |
+|---|---|
+| Where's the FSM upstream? | All of it in `commons/src/extensions/lb_pair.rs`; ported to `src/dynamic_fee.rs` as free functions |
+| `LbPair` shape | `PoolView` projection: `active_id`, `bin_step`, `has_rewards`, verbatim `StaticParameters`/`VariableParameters` PODs (IDL layouts minus padding). Status/activation gating = caller's job |
+| Mutation API | FSM takes `&mut PoolView` (upstream-faithful); orchestrators copy internally (upstream's own `let mut lb_pair = *lb_pair`) and return `pool_after` in the result |
+| Limit orders / collect-fee-mode | Ported (full current-upstream parity). `BinView` carries `price` + the three limit-order fields; MM-only pools degenerate to identical results |
 
-`compute_swap_step` / `compute_swap_full` / `SwapResult` / dynamic-fee
-state types are coming in milestones 4 + 5 — DESIGN.md sketched them
-but they're not in this drop. See "Architecture decision" below.
+Two deliberate, documented divergences from upstream `quote.rs`:
 
-## Architecture decision worth remembering (milestone 3)
+1. **Bin walking**: flat sorted `&[BinView]` instead of bin arrays +
+   bitmaps. Absent id = empty bin; walking past the supplied bins ⇒
+   `ErrorCode::PoolOutOfLiquidity` (upstream's bitmap-exhausted error).
+2. **`pool_after.last_update_timestamp = current_timestamp`**: the
+   throwaway upstream quote never writes it; the on-chain swap does.
+   Needed for chained simulation to decay correctly.
 
-Upstream's per-bin swap step (`Bin::swap` in
-`commons/src/extensions/bin.rs`) **is not** a self-contained pure
-function. It calls into `&LbPair` for every fee computation, since the
-fee is dynamic and pool-level.
+Replicated upstream quirk worth knowing: the exact-**out** loop resolves
+an uninitialized (`price == 0`) bin via `get_or_store_bin_price`; the
+exact-**in** loop reads `bin.price` as-is. Callers should pass decoded
+prices (or 0 only where upstream tolerates it).
 
-The split this crate adopts:
-
-| Module | Lands in | Carries |
-|---|---|---|
-| `swap_math.rs` | milestone 3 (done) | the four fee-INDEPENDENT per-bin primitives |
-| `dynamic_fee.rs` | milestone 4 (NEXT) | the FSM (`compute_fee`, `update_volatility_accumulator`, `update_references`) |
-| `swap_full.rs` | milestone 5 | the orchestrator that composes them, plus a synthesized `compute_swap_step` |
-
-This mirrors upstream's per-bin / per-pool architecture. **Do not** try
-to ship a self-contained `compute_swap_step(bin, price, amount_in, fee,
-swap_for_y)` — that signature is non-verbatim and would have to be
-refactored once the FSM lands. Wait for milestone 5.
-
-## Three open decisions before milestone 4
-
-1. **Where does the FSM actually live upstream?** Likely
-   `commons/src/extensions/lb_pair.rs` — `compute_fee`,
-   `update_volatility_accumulator`, `update_references`,
-   `advance_active_bin`. Confirm with
-   `curl -s https://raw.githubusercontent.com/MeteoraAg/dlmm-sdk/main/commons/src/extensions/lb_pair.rs`
-   before porting. Some FSM logic may live in the on-chain program
-   crate (which this repo's HEAD doesn't have anymore).
-
-2. **`LbPair` shape — full struct, or trimmed projection?** Upstream
-   `LbPair` is ~400 bytes with rewards / oracle / activation / status
-   fields irrelevant to swap math. Two options:
-   - Strip to a `PoolView { active_id, bin_step, ... }` projection
-     (consistent with the `BinView` posture chosen in milestone 3)
-   - Mirror the full Anchor struct (better for differential testing)
-
-   I'd lean projection — keeps the public surface narrow and stable
-   across upstream `LbPair` field changes. But the FSM mutates
-   `volatility_accumulator` / `volatility_reference` etc., so the
-   projection has to include enough state to round-trip the FSM.
-
-3. **Volatility-accumulator mutation API.** The FSM mutates state
-   during a swap (decays `volatility_reference`, bumps
-   `volatility_accumulator` per bin crossed). Three shapes:
-   - (a) `&mut DynamicFeeState` mutated in place — most upstream-faithful
-   - (b) returned new state by value — cleaner for backtesting/sim
-     callers who don't want hidden mutation
-   - (c) lives inside the orchestrator's `SwapResult` — caller gets
-     the post-swap state alongside the amounts
-
-   Each implies a different orchestrator (`compute_swap_full`)
-   shape. Pick before milestone 5.
-
-## Conventions that must hold across future milestones
+## Conventions that must hold (unchanged)
 
 - **Verbatim from upstream.** Every ported function carries a comment
-  pointing at the upstream file path. Allowed adjustments:
-  - `anyhow::Result<T>` → `crate::error::Result<T>`
-  - `.context("overflow")` → `.ok_or(ErrorCode::MathOverflow)?`
-  - `crate::*` glob imports → explicit `use` paths
-  - Free-function rehosting of methods that didn't read struct fields
-
-  Anything else (re-shaped signatures, "improved" rounding,
-  re-derived constants) is a v0.2+ concern, not v0.1.
-
-- **Value-pinned tests via independent oracle.** Every primitive gets
-  expected outputs generated by a re-implementation in **another
-  language** (Python so far) — never by running the function under
-  test and pasting the output back. The point is to catch porting
-  mistakes; a self-confirming test is dead weight. See
-  `tests/units.rs` for the existing pattern; the pattern carries
-  forward to milestones 4 and 5.
-
-- **`#[allow(clippy::all)]` on the lib root.** Tests are linted
-  normally (`-D warnings`); the lib stays diffable against upstream.
-
-- **Update both `CHANGELOG.md` (running record) and the README
-  "Status" line (one-line external view) every milestone.**
-
-## Deferrals locked in (don't accidentally re-port)
-
-| Primitive | Status | Notes |
-|---|---|---|
-| `get_id_from_price` | v0.2 | Upstream is float-based (`rust_decimal::Decimal::log10`). Plan: re-derive integer-only and value-pin against the float impl |
-| Token-2022 transfer-fee math | v0.2 | Mirrors sibling's pacing. Lift sibling's `transfer_fee` module verbatim |
-| `quote_exact_in` / `quote_exact_out` | v0.2 | Trivial wrappers around `compute_swap_full` once that exists |
-| `commons` differential dev-dep | v0.2 | Heavy graph. v0.1 leans on mainnet replay + property invariants |
-| Helius for fixture capture | dropped | Use public mainnet RPC (`api.mainnet-beta.solana.com`) instead — zero-config, sufficient throughput |
-| `litesvm` differential | v0.3 | Mirrors sibling's pacing. Don't fetch `lb_clmm.so` yet |
+  pointing at the upstream file. Allowed adjustments: `anyhow::Result` →
+  `crate::error::Result`, `.context(...)` → `.ok_or(ErrorCode::...)`,
+  method → free-function rehosting, explicit `use` paths.
+- **Value-pinned tests via independent oracle** — expectations come from
+  `scripts/oracle_fsm.py` / `scripts/oracle_swap.py` (independent Python
+  re-implementations), never from the Rust under test.
+- `#[allow(clippy::all)]` on the lib root; tests linted with `-D warnings`.
+- Update `CHANGELOG.md` + the README Status line every milestone.
 
 ## How to validate any change
 
 ```sh
-cargo build
-cargo test
+cargo build && cargo test
 cargo fmt --all -- --check
-cargo clippy --tests -- -D warnings
-cargo clippy --lib
+cargo clippy --tests -- -D warnings && cargo clippy --lib
 ```
 
-All five must be clean before the next milestone is "done." CI runs
-the same set on push / PR (`.github/workflows/ci.yml`).
+## scripts/
 
-## Where to look upstream (`MeteoraAg/dlmm-sdk` `main`)
+- `oracle_fsm.py`, `oracle_swap.py` — the independent oracles. Run
+  directly to reprint every pinned value in the test suite.
+- `capture_fixture.py` — re-captures live SOL-USDC pool state from
+  public RPC (stdlib-only: JSON-RPC, anchor-IDL account decode, ed25519
+  PDA derivation) and regenerates `tests/mainnet_replay.rs`. Re-running
+  it changes the pinned numbers (live state moved) — commit the
+  regenerated file and its new expectations together.
 
-| Need | Path |
+## v0.2+ roadmap (deferrals locked in)
+
+| Item | Notes |
 |---|---|
-| `pow` (Q64.64 binary exponential) | `commons/src/math/u64x64_math.rs` |
-| `get_price_from_id` | `commons/src/math/price_math.rs` |
-| `mul_div`, `mul_shr`, `shl_div`, `Rounding` | `commons/src/math/u128x128_math.rs` |
-| `safe_*_cast` family | `commons/src/math/utils.rs` |
-| Per-bin swap step (`Bin::swap` and helpers) | `commons/src/extensions/bin.rs` |
-| Bin-array walking, bitmap navigation | `commons/src/extensions/{bin_array,bin_array_bitmap}.rs` |
-| LbPair (incl. dynamic-fee FSM) | `commons/src/extensions/lb_pair.rs` |
-| Constants (`MIN_BIN_ID`, `MAX_BIN_ID`, `BASIS_POINT_MAX`, `MAX_BIN_STEP`, `FEE_PRECISION`, …) | `commons/src/constants.rs` |
-| Reference orchestrator (for milestone 5 + future differential) | `commons/src/quote.rs` |
-| `SwapResult` typedef shape | `commons/src/typedefs.rs` |
-
-Fetch via:
-
-```sh
-curl -s https://raw.githubusercontent.com/MeteoraAg/dlmm-sdk/main/<path>
-```
-
-`gh api repos/MeteoraAg/dlmm-sdk/contents/<dir>` works for directory
-listings.
+| `get_id_from_price` | Upstream is float-based (`rust_decimal` log10). Re-derive integer-only, value-pin against the float impl across the bin range |
+| Token-2022 transfer-fee math | Lift sibling's `transfer_fee` module verbatim; wraps amounts around `compute_swap_full` |
+| `commons` differential proptest | Add `commons` as dev-dep (heavy anchor graph — that's why it waited), fuzz ours vs `quote_exact_in`/`_out` |
+| `litesvm` differential | v0.3, mirroring sibling. Load `lb_clmm.so`, drive swap ixs, byte-exact compare. Also upgrades mainnet replay from oracle-pinned to tx-exact |
+| `safe_*_cast` re-genericization | Only if a future port needs non-u64 targets |
 
 ## Don'ts
 
-- Don't fetch the `lb_clmm` program ELF, set up litesvm, or write a
-  litesvm differential test before milestone 6 — days of work,
-  irrelevant for v0.1.
-- Don't add `MeteoraAg/dlmm-sdk` as a dev-dep yet — heavy graph
-  (anchor-lang + anchor-client + solana-sdk).
-- Don't `git push` without explicit instruction (Adam handles
-  publishing). Locally committing on `main` is fine.
-- Don't synthesize public API beyond what `DESIGN.md` specifies for
-  v0.1 unless the upstream-verbatim alternative is clearly worse —
-  and even then, ask first.
-- Don't skip the value-pinned-test pattern. A test that runs the
-  function and asserts the result equals the function's output is
-  worse than no test.
+- Don't `git push` or `cargo publish` without explicit instruction
+  (Adam handles both). Local commits on `main` are fine.
+- Don't add `MeteoraAg/dlmm-sdk` as a dev-dep before the v0.2
+  differential work starts.
+- Don't edit `tests/mainnet_replay.rs` numbers by hand — regenerate via
+  `scripts/capture_fixture.py`.
 
-## End-of-session pointers
+## End-of-session pointers (2026-07-21)
 
-- Branch: `main`. Pushed to `origin/main`.
-- All 11 tests passing, fmt + clippy clean.
-- Next milestone: 4 (dynamic-fee FSM). The three open decisions
-  above are the gating items; resolve them before writing code.
+- Branch: `main`, four local commits ahead of the 2026-04-27 push
+  (milestones 4, 5, 6, 7). Not pushed.
+- All 39 tests passing, fmt + clippy clean.
+- Next action: Adam reviews, pushes, runs `cargo publish --dry-run`,
+  then `cargo publish` 0.1.0 and tags `v0.1.0`.

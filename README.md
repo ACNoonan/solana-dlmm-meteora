@@ -15,13 +15,31 @@ and the multi-bin orchestrators `compute_swap_full` /
 `compute_swap_full_exact_out` (limit orders and collect-fee-mode
 included). 39 tests: value-pinned expectations from an independent
 Python oracle, proptest invariants, and a captured-mainnet-state
-replay of the SOL-USDC pair. Remaining before 0.1.0: docs polish +
-publish.
-See [`DESIGN.md`](DESIGN.md) for the v0.1 plan, math differences from
-CLMM, module layout, test strategy, and the remaining milestones
-(dynamic-fee FSM, multi-bin orchestrator, differential tests).
+replay of the SOL-USDC pair. Remaining before 0.1.0: `cargo publish`.
+See [`DESIGN.md`](DESIGN.md) for the design, math differences from
+CLMM, module layout, and test strategy; deferred to v0.2+:
+`get_id_from_price`, Token-2022 transfer-fee math, and the
+`commons`/litesvm differential layers.
 [`CHANGELOG.md`](CHANGELOG.md) tracks what's landed; [`docs/HANDOFF.md`](docs/HANDOFF.md)
 is the working-state doc for picking implementation back up.
+
+## Usage
+
+Decode your `LbPair` + `BinArray` accounts however you like (RPC,
+snapshot, backtest state), flatten them into a `PoolView` and a
+`bin_id`-sorted `&[BinView]`, and quote:
+
+```rust
+use solana_dlmm_meteora::{compute_swap_full, BinView, PoolView};
+
+let quote = compute_swap_full(&pool, &bins, amount_in, swap_for_y, now)?;
+// quote.amount_out, quote.fee, quote.protocol_fee
+// quote.pool_after — post-swap state (active bin + volatility FSM)
+//                    for chained simulation
+```
+
+Every function is a pure function of its inputs: no RPC, no Anchor, no
+`solana-program`, one tiny integer-math dep (`ruint`).
 
 ## Positioning
 
@@ -38,4 +56,4 @@ no-RPC math library, except this one.
 
 ## License
 
-Will be dual-licensed Apache-2.0 OR MIT (matching peer crates).
+Dual-licensed Apache-2.0 OR MIT (matching peer crates).

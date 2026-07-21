@@ -7,9 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Pre-v0.1, milestones 1–6 of 7 from `DESIGN.md` landed.
+**v0.1 feature-complete** — milestones 1–7 of 7 from `DESIGN.md`
+landed. Remaining before the 0.1.0 release: `cargo publish` (Adam).
 
 ### Added
+- **Docs for release** — milestone 7: crate-root docs updated to the
+  final v0.1 surface with a quick-start; README gained a Usage section
+  and the license line went from "will be" to "is"; `DESIGN.md` gained
+  a dated amendment block recording how the three HANDOFF decisions
+  were resolved and how the surface tracked upstream's limit-order /
+  collect-fee-mode evolution; `docs/HANDOFF.md` rewritten for the
+  post-v0.1 state (v0.2+ roadmap, capture-script workflow, publish
+  checklist).
 - **Property invariants under proptest** (`tests/props.rs`) — milestone
   6, DESIGN.md test layer 5: price strictly monotonic in bin id (fuzzed
   over ±2_000 ids × bin_steps 1–100), swap output bounded by supplied

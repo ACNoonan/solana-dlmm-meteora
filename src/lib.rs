@@ -14,10 +14,25 @@
 //!
 //! # Status
 //!
-//! Pre-v0.1. Milestones 1–2 of the v0.1 plan have landed (crate scaffold +
-//! bin id ↔ price math). The remaining milestones — single-bin swap step,
-//! dynamic-fee FSM, multi-bin orchestrator, and differential tests — are
-//! tracked in `DESIGN.md`.
+//! v0.1 feature-complete: bin id → Q64.64 price, the per-bin swap
+//! primitives, the dynamic-fee FSM over a flat [`PoolView`] projection, and
+//! the multi-bin orchestrators [`compute_swap_full`] /
+//! [`compute_swap_full_exact_out`] (limit orders and collect-fee-mode
+//! included). Deferred to v0.2+: `get_id_from_price` (upstream's only
+//! implementation is float-based), Token-2022 transfer-fee wrapping, and
+//! the `commons` / litesvm differential test layers — see `DESIGN.md`.
+//!
+//! # Quick start
+//!
+//! Decode your pool + bin-array accounts however you like (RPC, snapshot,
+//! backtest state), flatten them into a [`PoolView`] and a `bin_id`-sorted
+//! `&[BinView]`, and call [`compute_swap_full`]:
+//!
+//! ```rust,ignore
+//! let quote = compute_swap_full(&pool, &bins, amount_in, swap_for_y, now)?;
+//! // quote.amount_out, quote.fee, quote.protocol_fee,
+//! // quote.pool_after  — post-swap state for chained simulation
+//! ```
 //!
 //! # Provenance
 //!
